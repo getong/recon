@@ -18,6 +18,8 @@
 %% private exports
 -export([binary_memory/1]).
 
+-dialyzer({nowarn_function, [fold_processes/2, fold_processes_iter/3]}).
+
 -type diff() :: [recon:proc_attrs() | recon:inet_attrs()].
 
 %% @doc Compare two samples and return a list based on some key. The type mentioned
