@@ -492,6 +492,7 @@ validate_tspec(Mod, Fun, Args) ->
     case {lists:member(Mod, BannedMods), Args} of
         {true, '_'} -> error({dangerous_combo, {Mod,Fun,Args}});
         {true, []} -> error({dangerous_combo, {Mod,Fun,Args}});
+        {true, [{'_', [], [{return_trace}]}]} -> error({dangerous_combo, {Mod,Fun,Args}});
         _ -> ok
     end,
     case Args of
