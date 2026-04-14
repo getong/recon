@@ -423,8 +423,9 @@ setup(TracerFun, TracerArgs, FormatterFun, IOServer) ->
 %% Sets the traces in action
 trace_calls(TSpecs, Pid, Opts) ->
     {PidSpecs, TraceOpts, MatchOpts} = validate_opts(Opts),
+    PidsOnly = lists:all(fun is_pid/1, PidSpecs),
     Matches = [begin
-                {Arity, Spec} = validate_tspec(Mod, Fun, Args),
+                {Arity, Spec} = validate_tspec(Mod, Fun, Args, PidsOnly),
                 erlang:trace_pattern({Mod, Fun, Arity}, Spec, MatchOpts)
                end || {Mod, Fun, Args} <- TSpecs],
     [erlang:trace(PidSpec, true, [call, {tracer, Pid} | TraceOpts])
@@ -480,16 +481,16 @@ validate_pid_specs(PidTerm) ->
     %% has to be `recon:pid_term()'.
     [recon_lib:term_to_pid(PidTerm)].
 
-validate_tspec(Mod, Fun, Args) when is_function(Args) ->
-    validate_tspec(Mod, Fun, fun_to_ms(Args));
+validate_tspec(Mod, Fun, Args, PidsOnly) when is_function(Args) ->
+    validate_tspec(Mod, Fun, fun_to_ms(Args), PidsOnly);
 %% helper to save typing for common actions
-validate_tspec(Mod, Fun, return_trace) ->
-    validate_tspec(Mod, Fun, [{'_', [], [{return_trace}]}]);
-validate_tspec(Mod, Fun, Args) ->
+validate_tspec(Mod, Fun, return_trace, PidsOnly) ->
+    validate_tspec(Mod, Fun, [{'_', [], [{return_trace}]}], PidsOnly);
+validate_tspec(Mod, Fun, Args, PidsOnly) ->
     BannedMods = ['_', ?MODULE, io, lists],
     %% The banned mod check can be bypassed by using
     %% match specs if you really feel like being dumb.
-    case {lists:member(Mod, BannedMods), Args} of
+    case {lists:member(Mod, BannedMods) andalso not PidsOnly, Args} of
         {true, '_'} -> error({dangerous_combo, {Mod,Fun,Args}});
         {true, []} -> error({dangerous_combo, {Mod,Fun,Args}});
         {true, [{'_', [], [{return_trace}]}]} -> error({dangerous_combo, {Mod,Fun,Args}});
@@ -500,6 +501,8 @@ validate_tspec(Mod, Fun, Args) ->
         _ when is_list(Args) -> {'_', Args};
         _ when Args >= 0, Args =< 255 -> {Args, true}
     end.
+
+
 
 validate_formatter(Opts) ->
     case proplists:get_value(formatter, Opts) of
