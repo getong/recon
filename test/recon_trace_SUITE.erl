@@ -3,7 +3,8 @@
 -include_lib("eunit/include/eunit.hrl").
 -compile(export_all).
 
-all() -> [dangerous_combo, dangerous_combo_specific_pids].
+all() -> [dangerous_combo, dangerous_combo_specific_pids,
+          dangerous_combo_self_pid, dangerous_combo_io_server_pid].
 
 %%%%%%%%%%%%%
 %%% TESTS %%%
@@ -40,3 +41,12 @@ dangerous_combo_specific_pids(_Config) ->
     end,
     ?assertError({dangerous_combo, {'_', '_', '_'}},
         recon_trace:calls([{'_', '_', '_'}], 1, [{pid, [new, Pid, Pid2]}])).
+
+dangerous_combo_self_pid(_Config) ->
+    ?assertError({dangerous_combo, {'_', '_', '_'}},
+        recon_trace:calls([{'_', '_', '_'}], 1, [{pid, self()}])).
+
+dangerous_combo_io_server_pid(_Config) ->
+    GL = group_leader(),
+    ?assertError({dangerous_combo, {'_', '_', '_'}},
+        recon_trace:calls([{'_', '_', '_'}], 1, [{pid, GL}])).
