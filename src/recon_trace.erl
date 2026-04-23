@@ -337,13 +337,15 @@ calls(TSpecs = [_|_], Max) ->
 calls({Mod, Fun, Args}, Max, Opts) ->
     calls([{Mod,Fun,Args}], Max, Opts);
 calls(TSpecs = [_|_], {Max, Time}, Opts) ->
+    IOServer = validate_io_server(Opts),
     Pid = setup(rate_tracer, [Max, Time],
-                validate_formatter(Opts), validate_io_server(Opts)),
-    trace_calls(TSpecs, Pid, Opts);
+                validate_formatter(Opts), IOServer),
+    trace_calls(TSpecs, Pid, IOServer, Opts);
 calls(TSpecs = [_|_], Max, Opts) ->
+    IOServer = validate_io_server(Opts),
     Pid = setup(count_tracer, [Max],
-                validate_formatter(Opts), validate_io_server(Opts)),
-    trace_calls(TSpecs, Pid, Opts).
+                validate_formatter(Opts), IOServer),
+    trace_calls(TSpecs, Pid, IOServer, Opts).
 
 %%%%%%%%%%%%%%%%%%%%%%%
 %%% PRIVATE EXPORTS %%%
@@ -421,10 +423,12 @@ setup(TracerFun, TracerArgs, FormatterFun, IOServer) ->
     end.
 
 %% Sets the traces in action
-trace_calls(TSpecs, Pid, Opts) ->
+trace_calls(TSpecs, Pid, IOServer, Opts) ->
     {PidSpecs, TraceOpts, MatchOpts} = validate_opts(Opts),
+    UnsafePids = build_unsafe_pids(Pid, IOServer),
+    PidsOnly = lists:all(fun(P) -> is_safe_pid(P, UnsafePids) end, PidSpecs),
     Matches = [begin
-                {Arity, Spec} = validate_tspec(Mod, Fun, Args),
+                {Arity, Spec} = validate_tspec(Mod, Fun, Args, PidsOnly),
                 erlang:trace_pattern({Mod, Fun, Arity}, Spec, MatchOpts)
                end || {Mod, Fun, Args} <- TSpecs],
     [erlang:trace(PidSpec, true, [call, {tracer, Pid} | TraceOpts])
@@ -480,18 +484,19 @@ validate_pid_specs(PidTerm) ->
     %% has to be `recon:pid_term()'.
     [recon_lib:term_to_pid(PidTerm)].
 
-validate_tspec(Mod, Fun, Args) when is_function(Args) ->
-    validate_tspec(Mod, Fun, fun_to_ms(Args));
+validate_tspec(Mod, Fun, Args, PidsOnly) when is_function(Args) ->
+    validate_tspec(Mod, Fun, fun_to_ms(Args), PidsOnly);
 %% helper to save typing for common actions
-validate_tspec(Mod, Fun, return_trace) ->
-    validate_tspec(Mod, Fun, [{'_', [], [{return_trace}]}]);
-validate_tspec(Mod, Fun, Args) ->
+validate_tspec(Mod, Fun, return_trace, PidsOnly) ->
+    validate_tspec(Mod, Fun, [{'_', [], [{return_trace}]}], PidsOnly);
+validate_tspec(Mod, Fun, Args, PidsOnly) ->
     BannedMods = ['_', ?MODULE, io, lists],
     %% The banned mod check can be bypassed by using
     %% match specs if you really feel like being dumb.
-    case {lists:member(Mod, BannedMods), Args} of
+    case {lists:member(Mod, BannedMods) andalso not PidsOnly, Args} of
         {true, '_'} -> error({dangerous_combo, {Mod,Fun,Args}});
         {true, []} -> error({dangerous_combo, {Mod,Fun,Args}});
+        {true, [{'_', [], [{return_trace}]}]} -> error({dangerous_combo, {Mod,Fun,Args}});
         _ -> ok
     end,
     case Args of
@@ -499,6 +504,17 @@ validate_tspec(Mod, Fun, Args) ->
         _ when is_list(Args) -> {'_', Args};
         _ when Args >= 0, Args =< 255 -> {Args, true}
     end.
+
+is_safe_pid(P, Unsafe) when is_pid(P) -> not lists:member(P, Unsafe);
+is_safe_pid(_, _) -> false.
+
+resolve_io_server(Pid) when is_pid(Pid) -> Pid;
+resolve_io_server(Name) when is_atom(Name) -> whereis(Name).
+
+build_unsafe_pids(TracerPid, IOServer) ->
+    IOPid = resolve_io_server(IOServer),
+    FormatterPid = whereis(recon_trace_formatter),
+    [P || P <- [self(), TracerPid, FormatterPid, IOPid], is_pid(P)].
 
 validate_formatter(Opts) ->
     case proplists:get_value(formatter, Opts) of
